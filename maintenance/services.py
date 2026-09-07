@@ -1,9 +1,9 @@
 import calendar
 import datetime
-from typing import Optional
+from typing import List, Optional, Tuple
 from django.utils import timezone
 
-from maintenance.models import Task, TaskHistory
+from maintenance.models import NotificationLog, Task, TaskHistory
 
 
 def _add_months_to_date(source_date: datetime.date, months: int) -> datetime.date:
@@ -162,3 +162,63 @@ def generate_markdown_report(reference_date: Optional[datetime.date] = None) -> 
         lines.append("")
 
     return "\n".join(lines)
+
+
+def evaluate_due_alerts(reference_date: Optional[datetime.date] = None) -> List[Tuple[Task, str, str]]:
+    """
+    Check for tasks needing proactive alerts (T-3 days, T-1 day, Overdue).
+    Returns list of tuples: (Task, alert_type, message_text) for alerts that have not yet been sent
+    in the current cycle.
+    """
+    today = reference_date or timezone.now().date()
+    pending_alerts: List[Tuple[Task, str, str]] = []
+
+    tasks = Task.objects.filter(next_due__isnull=False)
+
+    for task in tasks:
+        due = task.next_due
+        diff = (due - today).days
+
+        alert_type = None
+        alert_msg = None
+
+        if diff == 3:
+            alert_type = NotificationLog.AlertType.T3
+            alert_msg = (
+                f"⏰ *Reminder (T-3 Days)*: Task #{task.id} *{task.title}* is due in 3 days ({due})."
+            )
+        elif diff == 1:
+            alert_type = NotificationLog.AlertType.T1
+            alert_msg = (
+                f"⚠️ *Final Reminder (T-1 Day)*: Task #{task.id} *{task.title}* is due tomorrow ({due})!"
+            )
+        elif diff <= 0:
+            alert_type = NotificationLog.AlertType.OVERDUE
+            days_over = abs(diff)
+            status = "due today" if days_over == 0 else f"overdue by {days_over} day{'s' if days_over != 1 else ''}"
+            alert_msg = (
+                f"🚨 *Overdue Alert*: Task #{task.id} *{task.title}* is {status} (due date was {due})."
+            )
+
+        if alert_type and alert_msg:
+            # Check if this alert was already sent for this cycle_due_date
+            already_sent = NotificationLog.objects.filter(
+                task=task,
+                alert_type=alert_type,
+                cycle_due_date=due,
+            ).exists()
+
+            if not already_sent:
+                pending_alerts.append((task, alert_type, alert_msg))
+
+    return pending_alerts
+
+
+def mark_alert_sent(task: Task, alert_type: str, cycle_due_date: datetime.date) -> NotificationLog:
+    """Record sent alert in NotificationLog to deduplicate future checks."""
+    return NotificationLog.objects.create(
+        task=task,
+        alert_type=alert_type,
+        cycle_due_date=cycle_due_date,
+    )
+

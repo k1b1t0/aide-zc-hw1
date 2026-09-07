@@ -19,12 +19,14 @@ from maintenance.bot import (
     export_command,
     create_bot_application,
 )
-from maintenance.models import Task, TaskHistory
+from maintenance.models import NotificationLog, Task, TaskHistory
 from maintenance.services import (
     calculate_next_due,
+    evaluate_due_alerts,
     format_countdown_status,
     generate_markdown_report,
     get_day_countdown,
+    mark_alert_sent,
 )
 
 
@@ -506,4 +508,72 @@ class TelegramBotClientAndAuthTests(TestCase):
         doc_bytes = kwargs["document"].getvalue().decode("utf-8")
         self.assertIn("# Household Maintenance Report", doc_bytes)
         self.assertIn("Test Task Export", doc_bytes)
+
+
+class ProactiveNotificationsAndAlertsTests(TestCase):
+    def test_evaluate_due_alerts_triggers_and_deduplicates(self):
+        """Verify evaluate_due_alerts identifies T-3, T-1, Overdue and respects NotificationLog."""
+        ref_today = datetime.date(2026, 9, 10)
+
+        # T-3 task (due in 3 days)
+        t_3 = Task.objects.create(
+            title="Clean Fridge Coils",
+            interval_type=Task.IntervalType.ELAPSED,
+            interval_value=90,
+            next_due=ref_today + datetime.timedelta(days=3),
+        )
+        # T-1 task (due tomorrow)
+        t_1 = Task.objects.create(
+            title="Replace Water Filter",
+            interval_type=Task.IntervalType.ELAPSED,
+            interval_value=60,
+            next_due=ref_today + datetime.timedelta(days=1),
+        )
+        # Overdue task
+        t_overdue = Task.objects.create(
+            title="Test Smoke Alarms",
+            interval_type=Task.IntervalType.CALENDAR,
+            interval_value=6,
+            next_due=ref_today - datetime.timedelta(days=2),
+        )
+        # Task due in 10 days (no alert)
+        t_future = Task.objects.create(
+            title="Deep Clean Oven",
+            interval_type=Task.IntervalType.ELAPSED,
+            interval_value=30,
+            next_due=ref_today + datetime.timedelta(days=10),
+        )
+
+        alerts = evaluate_due_alerts(reference_date=ref_today)
+        self.assertEqual(len(alerts), 3)
+
+        alert_tasks = [item[0] for item in alerts]
+        self.assertIn(t_3, alert_tasks)
+        self.assertIn(t_1, alert_tasks)
+        self.assertIn(t_overdue, alert_tasks)
+        self.assertNotIn(t_future, alert_tasks)
+
+        # Mark alerts as sent
+        for task, alert_type, _ in alerts:
+            mark_alert_sent(task, alert_type, task.next_due)
+
+        # Running evaluate again for same cycle returns 0 alerts
+        alerts_second_run = evaluate_due_alerts(reference_date=ref_today)
+        self.assertEqual(len(alerts_second_run), 0)
+
+        # Complete / clean up other tasks so they aren't overdue at new_ref
+        t_1.delete()
+        t_overdue.delete()
+        t_future.delete()
+
+        # When task is rescheduled for next cycle, new cycle allows new alerts
+        t_3.next_due = ref_today + datetime.timedelta(days=93)
+        t_3.save()
+        # Pretend today advances to 90 days later (so t_3 is again due in 3 days)
+        new_ref = t_3.next_due - datetime.timedelta(days=3)
+        new_cycle_alerts = evaluate_due_alerts(reference_date=new_ref)
+        self.assertEqual(len(new_cycle_alerts), 1)
+        self.assertEqual(new_cycle_alerts[0][0], t_3)
+        self.assertEqual(new_cycle_alerts[0][1], NotificationLog.AlertType.T3)
+
 

@@ -368,8 +368,23 @@ async def export_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
 
 
+async def scheduled_alert_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Periodic job to evaluate and send maintenance alerts."""
+    from maintenance.services import evaluate_due_alerts, mark_alert_sent
+    authorized_ids = getattr(settings, "TELEGRAM_AUTHORIZED_USER_IDS", [])
+    alerts = await sync_to_async(evaluate_due_alerts)()
+
+    for task, alert_type, message in alerts:
+        for uid in authorized_ids:
+            try:
+                await context.bot.send_message(chat_id=uid, text=message, parse_mode="Markdown")
+            except Exception as exc:
+                logger.error(f"Failed to send scheduled alert to {uid}: {exc}")
+        await sync_to_async(mark_alert_sent)(task, alert_type, task.next_due)
+
+
 def create_bot_application(token: str) -> Application:
-    """Build and configure the Telegram bot application with handlers."""
+    """Build and configure the Telegram bot application with handlers and job queue."""
     application = ApplicationBuilder().token(token).build()
 
     application.add_handler(CommandHandler("start", start_command))
@@ -381,5 +396,12 @@ def create_bot_application(token: str) -> Application:
     application.add_handler(CommandHandler("history", history_command))
     application.add_handler(CommandHandler("export", export_command))
 
+    # Schedule daily alerts check if JobQueue is available
+    if application.job_queue:
+        import datetime
+        target_time = datetime.time(hour=9, minute=0)
+        application.job_queue.run_daily(scheduled_alert_job, time=target_time)
+
     return application
+
 

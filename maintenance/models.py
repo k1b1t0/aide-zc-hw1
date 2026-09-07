@@ -35,3 +35,30 @@ class TaskHistory(models.Model):
 
     def __str__(self) -> str:
         return f"History #{self.id} for Task #{self.task_id} at {self.completed_at:%Y-%m-%d %H:%M}"
+
+
+class NotificationLog(models.Model):
+    class AlertType(models.TextChoices):
+        T3 = "T3", "T-3 Days Alert"
+        T1 = "T1", "T-1 Day Alert"
+        OVERDUE = "OVERDUE", "Overdue Alert"
+
+    task = models.ForeignKey(
+        Task,
+        on_delete=models.CASCADE,
+        related_name="notifications",
+    )
+    alert_type = models.CharField(max_length=20, choices=AlertType.choices)
+    cycle_due_date = models.DateField(help_text="The next_due date for which this alert was triggered")
+    sent_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["task", "alert_type", "cycle_due_date"],
+                name="unique_alert_per_cycle",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"Notification {self.alert_type} for Task #{self.task_id} (cycle {self.cycle_due_date})"
