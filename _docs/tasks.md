@@ -37,21 +37,21 @@ Define and migrate the Django ORM models for maintenance tasks and their histori
 
 ### Acceptance criteria
 
-- [ ] `Task` model is defined in `maintenance/models.py` with the following fields:
+- [x] `Task` model is defined in `maintenance/models.py` with the following fields:
   - `title`: `CharField(max_length=255)`
   - `interval_type`: `CharField` with choices for strict calendar (`CALENDAR`) and dynamic elapsed (`ELAPSED`)
   - `interval_value`: `PositiveIntegerField` (representing days or months)
   - `last_completed`: `DateField(null=True, blank=True)`
   - `next_due`: `DateField(null=True, blank=True)`
   - `created_at`: `DateTimeField(auto_now_add=True)`
-- [ ] `TaskHistory` model is defined in `maintenance/models.py` with:
+- [x] `TaskHistory` model is defined in `maintenance/models.py` with:
   - `task`: `ForeignKey(Task, on_delete=models.CASCADE, related_name='history')`
   - `completed_at`: `DateTimeField(default=timezone.now)`
   - `notes`: `TextField(blank=True, default='')`
-- [ ] Models specify human-readable string representations (`__str__`) showing task id/title and completion record details.
-- [ ] A migration file is generated under `maintenance/migrations/` creating both tables.
-- [ ] Running `python manage.py migrate` executes successfully against the default SQLite database without warnings or errors.
-- [ ] Model field constraints and relationships are tested in `maintenance/tests.py`, including creating a `Task`, creating associated `TaskHistory` entries, and verifying cascade deletion when a task is removed.
+- [x] Models specify human-readable string representations (`__str__`) showing task id/title and completion record details.
+- [x] A migration file is generated under `maintenance/migrations/` creating both tables.
+- [x] Running `python manage.py migrate` executes successfully against the default SQLite database without warnings or errors.
+- [x] Model field constraints and relationships are tested in `maintenance/tests.py`, including creating a `Task`, creating associated `TaskHistory` entries, and verifying cascade deletion when a task is removed.
 
 ### Out of scope
 
@@ -74,15 +74,15 @@ Implement pure date recalculation domain services that compute next due dates an
 
 ### Acceptance criteria
 
-- [ ] A service module `maintenance/services.py` defines calculation functions:
+- [x] A service module `maintenance/services.py` defines calculation functions:
   - `calculate_next_due(task, completion_date=None) -> datetime.date`
   - `get_day_countdown(next_due_date, reference_date=None) -> int` (returns positive integer for remaining days, 0 for due today, negative integer for overdue days)
   - `format_countdown_status(countdown_days: int) -> str` (e.g., returns `"Due in 5 days"`, `"Due today"`, or `"Overdue by 3 days"`)
-- [ ] For `ELAPSED` mode: `next_due` is computed by adding `interval_value` days to the completion date (or today if completion date not provided).
-- [ ] For `CALENDAR` mode: `next_due` advances strictly by the fixed interval cadence from the previous target date (or sets next anchor date), regardless of whether completed early or late.
-- [ ] Edge case handled: when a task is completed significantly overdue, next due date does not calculate to a date in the past; it advances to the next upcoming scheduled date.
-- [ ] Edge case handled: leap year dates (e.g. Feb 29) and month-end dates (e.g. Jan 31 + 1 month) do not throw `ValueError`.
-- [ ] Unit tests in `maintenance/tests.py` comprehensively test calendar mode, elapsed mode, on-time completion, overdue completion, early completion, and countdown formatting without making external network calls.
+- [x] For `ELAPSED` mode: `next_due` is computed by adding `interval_value` days to the completion date (or today if completion date not provided).
+- [x] For `CALENDAR` mode: `next_due` advances strictly by the fixed interval cadence from the previous target date (or sets next anchor date), regardless of whether completed early or late.
+- [x] Edge case handled: when a task is completed significantly overdue, next due date does not calculate to a date in the past; it advances to the next upcoming scheduled date.
+- [x] Edge case handled: leap year dates (e.g. Feb 29) and month-end dates (e.g. Jan 31 + 1 month) do not throw `ValueError`.
+- [x] Unit tests in `maintenance/tests.py` comprehensively test calendar mode, elapsed mode, on-time completion, overdue completion, early completion, and countdown formatting without making external network calls.
 
 ### Out of scope
 
@@ -105,16 +105,16 @@ Implement a report generation service that queries active maintenance tasks, the
 
 ### Acceptance criteria
 
-- [ ] A service function (e.g., `generate_markdown_report() -> str`) is defined in `maintenance/services.py` (or `maintenance/reports.py`).
-- [ ] Report starts with a top-level `# Household Maintenance Report` header and a generation timestamp line in UTC ISO format (e.g., `Generated on: YYYY-MM-DD HH:MM:SS UTC`).
-- [ ] Report contains distinct sections: `## Overdue Tasks`, `## Upcoming Tasks`, and `## Completion History`.
-- [ ] Overdue tasks section displays a Markdown table with columns: `| Task ID | Title | Recurrence | Next Due Date | Days Overdue |`.
-- [ ] Upcoming tasks section displays a Markdown table with columns: `| Task ID | Title | Recurrence | Next Due Date | Days Remaining |` sorted ascending by due date.
-- [ ] Completion history section lists entries grouped by task, displaying completion timestamps and note text.
-- [ ] Empty state handling: If there are no overdue tasks, displays `_No overdue tasks._`. If there are no tasks in the database, displays `_No maintenance tasks recorded._`.
-- [ ] Null handling: Tasks with `next_due = None` display `N/A` without raising a `TypeError` or formatting error.
-- [ ] Special character sanitization: Markdown table delimiters (`|`) or multiline notes in task titles and notes are escaped/sanitized to prevent broken table columns.
-- [ ] Unit tests in `maintenance/tests.py` verify markdown generation with empty tables, populated tasks, overdue tasks, and multi-line notes.
+- [x] A service function (e.g., `generate_markdown_report() -> str`) is defined in `maintenance/services.py` (or `maintenance/reports.py`).
+- [x] Report starts with a top-level `# Household Maintenance Report` header and a generation timestamp line in UTC ISO format (e.g., `Generated on: YYYY-MM-DD HH:MM:SS UTC`).
+- [x] Report contains distinct sections: `## Overdue Tasks`, `## Upcoming Tasks`, and `## Completion History`.
+- [x] Overdue tasks section displays a Markdown table with columns: `| Task ID | Title | Recurrence | Next Due Date | Days Overdue |`.
+- [x] Upcoming tasks section displays a Markdown table with columns: `| Task ID | Title | Recurrence | Next Due Date | Days Remaining |` sorted ascending by due date.
+- [x] Completion history section lists entries grouped by task, displaying completion timestamps and note text.
+- [x] Empty state handling: If there are no overdue tasks, displays `_No overdue tasks._`. If there are no tasks in the database, displays `_No maintenance tasks recorded._`.
+- [x] Null handling: Tasks with `next_due = None` display `N/A` without raising a `TypeError` or formatting error.
+- [x] Special character sanitization: Markdown table delimiters (`|`) or multiline notes in task titles and notes are escaped/sanitized to prevent broken table columns.
+- [x] Unit tests in `maintenance/tests.py` verify markdown generation with empty tables, populated tasks, overdue tasks, and multi-line notes.
 
 ### Out of scope
 
@@ -137,14 +137,14 @@ Set up the Telegram bot client framework within Django, configure authentication
 
 ### Acceptance criteria
 
-- [ ] Bot dependencies (`python-telegram-bot>=20.0`) are declared in `pyproject.toml` and installed.
-- [ ] Settings configuration in `config/settings.py` reads `TELEGRAM_BOT_TOKEN` and `TELEGRAM_AUTHORIZED_USER_ID` (as an integer or comma-separated list of integers) from environment variables.
-- [ ] An authentication decorator or filter is implemented to ignore or reject messages from unauthorized Telegram `user_id`s with an unauthorized response.
-- [ ] Command handler for `/start` sends a welcome message introducing the Household Maintenance Tracker and listing available commands.
-- [ ] Command handler for `/help` returns the list of all supported commands with brief usage examples.
-- [ ] A custom Django management command `python manage.py runbot` is implemented in `maintenance/management/commands/runbot.py` to start the bot in long-polling mode.
-- [ ] Graceful shutdown: stopping the management command via SIGINT/Ctrl+C exits without leaving zombie threads or unhandled exceptions.
-- [ ] Tests verify that unauthorized user IDs receive an access denied response or are ignored, while authorized IDs receive the welcome/help response.
+- [x] Bot dependencies (`python-telegram-bot>=20.0`) are declared in `pyproject.toml` and installed.
+- [x] Settings configuration in `config/settings.py` reads `TELEGRAM_BOT_TOKEN` and `TELEGRAM_AUTHORIZED_USER_ID` (as an integer or comma-separated list of integers) from environment variables.
+- [x] An authentication decorator or filter is implemented to ignore or reject messages from unauthorized Telegram `user_id`s with an unauthorized response.
+- [x] Command handler for `/start` sends a welcome message introducing the Household Maintenance Tracker and listing available commands.
+- [x] Command handler for `/help` returns the list of all supported commands with brief usage examples.
+- [x] A custom Django management command `python manage.py runbot` is implemented in `maintenance/management/commands/runbot.py` to start the bot in long-polling mode.
+- [x] Graceful shutdown: stopping the management command via SIGINT/Ctrl+C exits without leaving zombie threads or unhandled exceptions.
+- [x] Tests verify that unauthorized user IDs receive an access denied response or are ignored, while authorized IDs receive the welcome/help response.
 
 ### Out of scope
 
@@ -168,14 +168,14 @@ Implement Telegram slash commands `/list` and `/due` to allow the user to view a
 
 ### Acceptance criteria
 
-- [ ] Command handler `/list` queries all active `Task` objects from the database ordered by `next_due` ascending.
-- [ ] `/list` output formats each task showing: ID, title, recurrence interval, next due date, and calculated countdown status (e.g. `[1] Clean HVAC Filters - Every 90 days - Due in 4 days (2026-09-15)`).
-- [ ] When no tasks exist in the database, `/list` responds with `No maintenance tasks found. Use /add to create one.`
-- [ ] Command handler `/due` filters tasks that are either overdue (`next_due < today`) or due within the upcoming 7 days (`next_due <= today + 7 days`).
-- [ ] `/due` clearly differentiates overdue items (e.g. prefixed with `⚠️ OVERDUE by X days`) from upcoming items (e.g. `⏳ Due in X days`).
-- [ ] When no tasks are due within 7 days and none are overdue, `/due` responds with `All caught up! No tasks due in the next 7 days.`
-- [ ] Long output handling: If task count exceeds Telegram's 4096 character message limit, messages are cleanly chunked without cutting off in the middle of a line.
-- [ ] Unit/integration tests verify `/list` and `/due` formatting for empty state, overdue items, near-due items, and items due beyond 7 days.
+- [x] Command handler `/list` queries all active `Task` objects from the database ordered by `next_due` ascending.
+- [x] `/list` output formats each task showing: ID, title, recurrence interval, next due date, and calculated countdown status (e.g. `[1] Clean HVAC Filters - Every 90 days - Due in 4 days (2026-09-15)`).
+- [x] When no tasks exist in the database, `/list` responds with `No maintenance tasks found. Use /add to create one.`
+- [x] Command handler `/due` filters tasks that are either overdue (`next_due < today`) or due within the upcoming 7 days (`next_due <= today + 7 days`).
+- [x] `/due` clearly differentiates overdue items (e.g. prefixed with `⚠️ OVERDUE by X days`) from upcoming items (e.g. `⏳ Due in X days`).
+- [x] When no tasks are due within 7 days and none are overdue, `/due` responds with `All caught up! No tasks due in the next 7 days.`
+- [x] Long output handling: If task count exceeds Telegram's 4096 character message limit, messages are cleanly chunked without cutting off in the middle of a line.
+- [x] Unit/integration tests verify `/list` and `/due` formatting for empty state, overdue items, near-due items, and items due beyond 7 days.
 
 ### Out of scope
 
@@ -198,18 +198,18 @@ Implement Telegram commands `/add` to register new recurring maintenance tasks a
 
 ### Acceptance criteria
 
-- [ ] `/add <title> | <interval_value> <days|months> | <calendar|elapsed>` parses input arguments and creates a new `Task` record.
+- [x] `/add <title> | <interval_value> <days|months> | <calendar|elapsed>` parses input arguments and creates a new `Task` record.
   - Example: `/add Clean AC Filters | 30 days | elapsed`
-- [ ] If `/add` receives malformed arguments, it returns a clear error message with the expected syntax and examples.
-- [ ] Successfully creating a task returns a confirmation message showing task ID, title, mode, and computed initial `next_due` date.
-- [ ] `/done <id> [optional notes...]` marks the specified task completed:
+- [x] If `/add` receives malformed arguments, it returns a clear error message with the expected syntax and examples.
+- [x] Successfully creating a task returns a confirmation message showing task ID, title, mode, and computed initial `next_due` date.
+- [x] `/done <id> [optional notes...]` marks the specified task completed:
   - Looks up task by ID; returns error if ID is invalid or non-existent (e.g. `Task with ID 99 not found.`).
   - Creates a `TaskHistory` record linked to the task with timestamp `timezone.now()` and any user-provided notes.
   - Updates task `last_completed` date to today.
   - Recalculates and updates task `next_due` using the domain recalculation service from task #3.
   - Saves the updated task within an atomic database transaction (`transaction.atomic`).
-- [ ] `/done` responds with a confirmation message displaying the completion logged, notes saved, and the newly calculated next due date.
-- [ ] Tests verify `/add` with valid/invalid parameters and `/done` with valid ID, invalid ID, with notes, without notes, and checks DB state updates.
+- [x] `/done` responds with a confirmation message displaying the completion logged, notes saved, and the newly calculated next due date.
+- [x] Tests verify `/add` with valid/invalid parameters and `/done` with valid ID, invalid ID, with notes, without notes, and checks DB state updates.
 
 ### Out of scope
 
@@ -232,15 +232,15 @@ Implement Telegram slash commands `/history <id>` to inspect past completions an
 
 ### Acceptance criteria
 
-- [ ] Command `/history <id>` looks up task by ID and fetches all related `TaskHistory` records sorted by `completed_at` descending.
-- [ ] If task ID does not exist, responds with `Task #<id> not found.`
-- [ ] If task has no recorded completions, responds with `No completion history recorded for task #<id> (<title>).`
-- [ ] Displays historical entries with formatted completion date and note text (or `(No notes provided)` if empty).
-- [ ] Command `/export` invokes `generate_markdown_report()` from task #4 to compile the markdown report.
-- [ ] The generated report content is converted to an in-memory document file (using `io.BytesIO`) with filename `maintenance_report.md`.
-- [ ] The bot sends the file using Telegram's `send_document` API with a caption summarizing task totals.
-- [ ] Error handling: If report generation fails or database is unreachable, catches the exception and returns a user-friendly error message rather than crashing the bot.
-- [ ] Tests in `maintenance/tests.py` verify `/history` response format for populated and empty histories, and mock Telegram's `send_document` to test `/export`.
+- [x] Command `/history <id>` looks up task by ID and fetches all related `TaskHistory` records sorted by `completed_at` descending.
+- [x] If task ID does not exist, responds with `Task #<id> not found.`
+- [x] If task has no recorded completions, responds with `No completion history recorded for task #<id> (<title>).`
+- [x] Displays historical entries with formatted completion date and note text (or `(No notes provided)` if empty).
+- [x] Command `/export` invokes `generate_markdown_report()` from task #4 to compile the markdown report.
+- [x] The generated report content is converted to an in-memory document file (using `io.BytesIO`) with filename `maintenance_report.md`.
+- [x] The bot sends the file using Telegram's `send_document` API with a caption summarizing task totals.
+- [x] Error handling: If report generation fails or database is unreachable, catches the exception and returns a user-friendly error message rather than crashing the bot.
+- [x] Tests in `maintenance/tests.py` verify `/history` response format for populated and empty histories, and mock Telegram's `send_document` to test `/export`.
 
 ### Out of scope
 
@@ -263,16 +263,16 @@ Implement a background alerting service and Django management command that check
 
 ### Acceptance criteria
 
-- [ ] An alert tracking model (e.g. `NotificationLog` or tracking fields on `Task`) is created to record which alerts (T-3, T-1, Overdue) have already been sent for the current due cycle.
-- [ ] An alert evaluation service (e.g. `evaluate_due_alerts()`) identifies:
+- [x] An alert tracking model (e.g. `NotificationLog` or tracking fields on `Task`) is created to record which alerts (T-3, T-1, Overdue) have already been sent for the current due cycle.
+- [x] An alert evaluation service (e.g. `evaluate_due_alerts()`) identifies:
   - Tasks with `next_due == today + 3 days` (T-3 alert)
   - Tasks with `next_due == today + 1 day` (T-1 alert)
   - Tasks with `next_due <= today` (Overdue alert)
-- [ ] Notification deduplication: A notification is sent at most once per task per alert type per due cycle; completing a task and rescheduling resets the notification tracker.
-- [ ] When matching tasks are found, messages are formatted with task title, due date, and days remaining, and sent via Telegram's `send_message` API to `TELEGRAM_AUTHORIZED_USER_ID`.
-- [ ] A Django management command `python manage.py send_alerts` is created to execute the alert check once (suitable for external cron jobs).
-- [ ] A periodic background job or scheduler loop (e.g., using `python-telegram-bot`'s `JobQueue`) runs the alert check once daily at a designated time (e.g., 09:00 AM).
-- [ ] Tests verify that T-3, T-1, and overdue tasks trigger alerts, verify duplicate runs on the same day do not send duplicate messages, and verify alerts reset after task completion.
+- [x] Notification deduplication: A notification is sent at most once per task per alert type per due cycle; completing a task and rescheduling resets the notification tracker.
+- [x] When matching tasks are found, messages are formatted with task title, due date, and days remaining, and sent via Telegram's `send_message` API to `TELEGRAM_AUTHORIZED_USER_ID`.
+- [x] A Django management command `python manage.py send_alerts` is created to execute the alert check once (suitable for external cron jobs).
+- [x] A periodic background job or scheduler loop (e.g., using `python-telegram-bot`'s `JobQueue`) runs the alert check once daily at a designated time (e.g., 09:00 AM).
+- [x] Tests verify that T-3, T-1, and overdue tasks trigger alerts, verify duplicate runs on the same day do not send duplicate messages, and verify alerts reset after task completion.
 
 ### Out of scope
 
