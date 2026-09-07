@@ -15,6 +15,8 @@ from maintenance.bot import (
     due_command,
     add_command,
     done_command,
+    history_command,
+    export_command,
     create_bot_application,
 )
 from maintenance.models import Task, TaskHistory
@@ -447,3 +449,61 @@ class TelegramBotClientAndAuthTests(TestCase):
         history = await TaskHistory.objects.filter(task=updated_task).afirst()
         self.assertIsNotNone(history)
         self.assertEqual(history.notes, "Steam cleaned with lemon")
+
+    @override_settings(TELEGRAM_AUTHORIZED_USER_IDS=[123456])
+    async def test_history_command_missing_empty_and_populated(self):
+        """Verify /history handles missing ID, empty history, and multiple entries."""
+        update = self._create_mock_update(user_id=123456)
+        context = MagicMock()
+
+        # Non-existent task ID
+        context.args = ["8888"]
+        await history_command(update, context)
+        update.effective_message.reply_text.assert_called_with("Task #8888 not found.")
+
+        # Create task without history
+        task = await Task.objects.acreate(
+            title="Clean Windows",
+            interval_type=Task.IntervalType.ELAPSED,
+            interval_value=30,
+        )
+        update.effective_message.reply_text.reset_mock()
+        context.args = [str(task.id)]
+        await history_command(update, context)
+        self.assertIn("No completion history recorded", update.effective_message.reply_text.call_args[0][0])
+
+        # Add history entries
+        await TaskHistory.objects.acreate(
+            task=task,
+            completed_at=timezone.now(),
+            notes="Living room only",
+        )
+        update.effective_message.reply_text.reset_mock()
+        await history_command(update, context)
+        resp = update.effective_message.reply_text.call_args[0][0]
+        self.assertIn("Living room only", resp)
+        self.assertIn(f"Completion History for #{task.id}: Clean Windows", resp)
+
+    @override_settings(TELEGRAM_AUTHORIZED_USER_IDS=[123456])
+    async def test_export_command_sends_markdown_document(self):
+        """Verify /export generates report and calls reply_document."""
+        update = self._create_mock_update(user_id=123456)
+        update.effective_message.reply_document = AsyncMock()
+        context = MagicMock()
+
+        await Task.objects.acreate(
+            title="Test Task Export",
+            interval_type=Task.IntervalType.ELAPSED,
+            interval_value=10,
+        )
+
+        await export_command(update, context)
+
+        update.effective_message.reply_document.assert_called_once()
+        kwargs = update.effective_message.reply_document.call_args[1]
+        self.assertEqual(kwargs["filename"], "maintenance_report.md")
+        self.assertIn("Household Maintenance Report", kwargs["caption"])
+        doc_bytes = kwargs["document"].getvalue().decode("utf-8")
+        self.assertIn("# Household Maintenance Report", doc_bytes)
+        self.assertIn("Test Task Export", doc_bytes)
+

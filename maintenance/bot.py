@@ -294,6 +294,80 @@ async def done_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await update.effective_message.reply_text(confirm_msg, parse_mode="Markdown")
 
 
+def _sync_get_task_history(task_id: int):
+    try:
+        task = Task.objects.get(id=task_id)
+    except Task.DoesNotExist:
+        return None, None
+    histories = list(task.history.all().order_by("-completed_at"))
+    return task, histories
+
+
+@authorized_only
+async def history_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handler for /history <id> command."""
+    usage_error = "❌ *Usage:* `/history <id>`\n*Example:* `/history 1`"
+
+    if not update.effective_message or not context.args:
+        if update.effective_message:
+            await update.effective_message.reply_text(usage_error, parse_mode="Markdown")
+        return
+
+    first_arg = context.args[0]
+    if not first_arg.isdigit():
+        await update.effective_message.reply_text(usage_error, parse_mode="Markdown")
+        return
+
+    task_id = int(first_arg)
+    task, histories = await sync_to_async(_sync_get_task_history)(task_id)
+
+    if task is None:
+        await update.effective_message.reply_text(f"Task #{task_id} not found.")
+        return
+
+    if not histories:
+        await update.effective_message.reply_text(
+            f"No completion history recorded for task #{task.id} ({task.title})."
+        )
+        return
+
+    lines = [f"📜 *Completion History for #{task.id}: {task.title}*", ""]
+    for h in histories:
+        date_str = h.completed_at.strftime("%Y-%m-%d %H:%M")
+        notes_str = h.notes.strip() if h.notes else "(No notes provided)"
+        lines.append(f"• *{date_str}*: {notes_str}")
+
+    await _reply_chunked(update, lines)
+
+
+@authorized_only
+async def export_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handler for /export command: sends maintenance_report.md file directly."""
+    if not update.effective_message:
+        return
+
+    try:
+        from maintenance.services import generate_markdown_report
+        report_content = await sync_to_async(generate_markdown_report)()
+        task_count = await sync_to_async(Task.objects.count)()
+
+        import io
+        file_bytes = io.BytesIO(report_content.encode("utf-8"))
+        file_bytes.name = "maintenance_report.md"
+
+        caption = f"📄 Household Maintenance Report ({task_count} task{'s' if task_count != 1 else ''} recorded)"
+        await update.effective_message.reply_document(
+            document=file_bytes,
+            filename="maintenance_report.md",
+            caption=caption,
+        )
+    except Exception as exc:
+        logger.error(f"Error generating or sending export report: {exc}", exc_info=True)
+        await update.effective_message.reply_text(
+            "❌ Failed to generate maintenance report. Please try again later."
+        )
+
+
 def create_bot_application(token: str) -> Application:
     """Build and configure the Telegram bot application with handlers."""
     application = ApplicationBuilder().token(token).build()
@@ -304,5 +378,8 @@ def create_bot_application(token: str) -> Application:
     application.add_handler(CommandHandler("due", due_command))
     application.add_handler(CommandHandler("add", add_command))
     application.add_handler(CommandHandler("done", done_command))
+    application.add_handler(CommandHandler("history", history_command))
+    application.add_handler(CommandHandler("export", export_command))
 
     return application
+
