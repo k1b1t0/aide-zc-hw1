@@ -1,15 +1,24 @@
 import datetime
+from unittest.mock import AsyncMock, MagicMock, patch
+
 from django.apps import apps
-from django.test import TestCase
+from django.conf import settings
+from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from maintenance.apps import MaintenanceConfig
+from maintenance.bot import (
+    authorized_only,
+    help_command,
+    start_command,
+    create_bot_application,
+)
 from maintenance.models import Task, TaskHistory
 from maintenance.services import (
     calculate_next_due,
-    get_day_countdown,
     format_countdown_status,
     generate_markdown_report,
+    get_day_countdown,
 )
 
 
@@ -98,7 +107,6 @@ class RecalculationDomainServiceTests(TestCase):
             interval_value=3,  # 3 months
             next_due=datetime.date(2026, 6, 1),
         )
-        # Completed on 2026-05-28 (early)
         next_due = calculate_next_due(
             task,
             completion_date=datetime.date(2026, 5, 28),
@@ -113,7 +121,6 @@ class RecalculationDomainServiceTests(TestCase):
             interval_value=1,  # monthly
             next_due=datetime.date(2026, 1, 15),
         )
-        # Completed on 2026-04-10 (3 months late)
         next_due = calculate_next_due(
             task,
             completion_date=datetime.date(2026, 4, 10),
@@ -192,21 +199,18 @@ class MarkdownReportServiceTests(TestCase):
         """Verify overdue, upcoming tables, null dates, and sanitization."""
         ref_today = datetime.date(2026, 9, 10)
 
-        # Overdue task with pipe in title
         t_overdue = Task.objects.create(
             title="Clean Filter | Left & Right",
             interval_type=Task.IntervalType.ELAPSED,
             interval_value=30,
             next_due=datetime.date(2026, 9, 5),
         )
-        # Upcoming task
         t_upcoming = Task.objects.create(
             title="Oil Chainsaw",
             interval_type=Task.IntervalType.ELAPSED,
             interval_value=60,
             next_due=datetime.date(2026, 9, 20),
         )
-        # Unscheduled task (next_due is None)
         t_none = Task.objects.create(
             title="Inspect Roof",
             interval_type=Task.IntervalType.CALENDAR,
@@ -214,7 +218,6 @@ class MarkdownReportServiceTests(TestCase):
             next_due=None,
         )
 
-        # History with multiline notes
         TaskHistory.objects.create(
             task=t_overdue,
             completed_at=timezone.make_aware(datetime.datetime(2026, 8, 5, 14, 30)),
@@ -223,21 +226,73 @@ class MarkdownReportServiceTests(TestCase):
 
         report = generate_markdown_report(reference_date=ref_today)
 
-        # Check header
         self.assertIn("# Household Maintenance Report", report)
-
-        # Check Overdue section table
         self.assertIn("| Task ID | Title | Recurrence | Next Due Date | Days Overdue |", report)
         self.assertIn(f"| {t_overdue.id} | Clean Filter \\| Left & Right |", report)
         self.assertIn("5 |", report)
-
-        # Check Upcoming section table
         self.assertIn("| Task ID | Title | Recurrence | Next Due Date | Days Remaining |", report)
         self.assertIn(f"| {t_upcoming.id} | Oil Chainsaw |", report)
         self.assertIn("10 |", report)
         self.assertIn(f"| {t_none.id} | Inspect Roof |", report)
         self.assertIn("N/A |", report)
-
-        # Check Completion History
         self.assertIn(f"### Task #{t_overdue.id}: Clean Filter \\| Left & Right", report)
         self.assertIn("Line 1 Line 2 \\| with pipe", report)
+
+
+class TelegramBotClientAndAuthTests(TestCase):
+    def _create_mock_update(self, user_id: int):
+        update = MagicMock()
+        user = MagicMock()
+        user.id = user_id
+        update.effective_user = user
+        message = AsyncMock()
+        update.effective_message = message
+        return update
+
+    @override_settings(TELEGRAM_AUTHORIZED_USER_IDS=[123456])
+    async def test_authorized_user_can_access_start_command(self):
+        """Authorized user gets welcome message from /start."""
+        update = self._create_mock_update(user_id=123456)
+        context = MagicMock()
+
+        await start_command(update, context)
+
+        update.effective_message.reply_text.assert_called_once()
+        call_args = update.effective_message.reply_text.call_args[0][0]
+        self.assertIn("Welcome to the Household Maintenance Tracker Bot!", call_args)
+
+    @override_settings(TELEGRAM_AUTHORIZED_USER_IDS=[123456])
+    async def test_unauthorized_user_is_rejected(self):
+        """Unauthorized user receives access denied."""
+        update = self._create_mock_update(user_id=999999)
+        context = MagicMock()
+
+        await start_command(update, context)
+
+        update.effective_message.reply_text.assert_called_once()
+        call_args = update.effective_message.reply_text.call_args[0][0]
+        self.assertIn("Access Denied", call_args)
+
+    @override_settings(TELEGRAM_AUTHORIZED_USER_IDS=[123456])
+    async def test_help_command_lists_all_commands(self):
+        """Authorized user gets full command reference from /help."""
+        update = self._create_mock_update(user_id=123456)
+        context = MagicMock()
+
+        await help_command(update, context)
+
+        update.effective_message.reply_text.assert_called_once()
+        call_args = update.effective_message.reply_text.call_args[0][0]
+        self.assertIn("/start", call_args)
+        self.assertIn("/help", call_args)
+        self.assertIn("/list", call_args)
+        self.assertIn("/due", call_args)
+        self.assertIn("/add", call_args)
+        self.assertIn("/done", call_args)
+        self.assertIn("/history", call_args)
+        self.assertIn("/export", call_args)
+
+    def test_create_bot_application(self):
+        """Verify bot application builds with registered handlers."""
+        app = create_bot_application("dummy_token")
+        self.assertIsNotNone(app)

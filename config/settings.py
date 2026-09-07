@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.1/ref/settings/
 """
 
+import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -126,3 +127,10 @@ MAILERS = {
         'BACKEND': 'django.core.mail.backends.console.EmailBackend',
     },
 }
+
+# Telegram Bot Settings
+TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '')
+_raw_user_ids = os.environ.get('TELEGRAM_AUTHORIZED_USER_ID', '')
+TELEGRAM_AUTHORIZED_USER_IDS = [
+    int(uid.strip()) for uid in _raw_user_ids.split(',') if uid.strip().isdigit()
+]
