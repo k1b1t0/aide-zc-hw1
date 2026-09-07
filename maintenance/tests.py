@@ -11,6 +11,8 @@ from maintenance.bot import (
     authorized_only,
     help_command,
     start_command,
+    list_command,
+    due_command,
     create_bot_application,
 )
 from maintenance.models import Task, TaskHistory
@@ -296,3 +298,74 @@ class TelegramBotClientAndAuthTests(TestCase):
         """Verify bot application builds with registered handlers."""
         app = create_bot_application("dummy_token")
         self.assertIsNotNone(app)
+
+    @override_settings(TELEGRAM_AUTHORIZED_USER_IDS=[123456])
+    async def test_list_command_empty_and_populated(self):
+        """Verify /list output for empty DB and populated tasks."""
+        update = self._create_mock_update(user_id=123456)
+        context = MagicMock()
+
+        # Empty state
+        await list_command(update, context)
+        update.effective_message.reply_text.assert_called_with(
+            "No maintenance tasks found. Use /add to create one."
+        )
+
+        # Create tasks
+        t1 = await Task.objects.acreate(
+            title="Clean HVAC Filters",
+            interval_type=Task.IntervalType.ELAPSED,
+            interval_value=90,
+            next_due=timezone.now().date() + datetime.timedelta(days=4),
+        )
+        update.effective_message.reply_text.reset_mock()
+
+        await list_command(update, context)
+        update.effective_message.reply_text.assert_called_once()
+        response_text = update.effective_message.reply_text.call_args[0][0]
+        self.assertIn(f"[{t1.id}] *Clean HVAC Filters*", response_text)
+        self.assertIn("Due in 4 days", response_text)
+
+    @override_settings(TELEGRAM_AUTHORIZED_USER_IDS=[123456])
+    async def test_due_command_filters_overdue_and_near_due(self):
+        """Verify /due filters only overdue and tasks due within 7 days."""
+        update = self._create_mock_update(user_id=123456)
+        context = MagicMock()
+        today = timezone.now().date()
+
+        # Empty state
+        await due_command(update, context)
+        update.effective_message.reply_text.assert_called_with(
+            "All caught up! No tasks due in the next 7 days."
+        )
+
+        # Overdue task
+        t_overdue = await Task.objects.acreate(
+            title="Check Fire Extinguisher",
+            interval_type=Task.IntervalType.CALENDAR,
+            interval_value=6,
+            next_due=today - datetime.timedelta(days=2),
+        )
+        # Due in 3 days (within 7 days)
+        t_near = await Task.objects.acreate(
+            title="Water Garden Herbs",
+            interval_type=Task.IntervalType.ELAPSED,
+            interval_value=7,
+            next_due=today + datetime.timedelta(days=3),
+        )
+        # Due in 20 days (outside 7 days)
+        t_far = await Task.objects.acreate(
+            title="Service Lawn Mower",
+            interval_type=Task.IntervalType.ELAPSED,
+            interval_value=60,
+            next_due=today + datetime.timedelta(days=20),
+        )
+
+        update.effective_message.reply_text.reset_mock()
+        await due_command(update, context)
+
+        update.effective_message.reply_text.assert_called_once()
+        response_text = update.effective_message.reply_text.call_args[0][0]
+        self.assertIn(f"OVERDUE by 2 days*: [{t_overdue.id}] Check Fire Extinguisher", response_text)
+        self.assertIn(f"Due in 3 days*: [{t_near.id}] Water Garden Herbs", response_text)
+        self.assertNotIn("Service Lawn Mower", response_text)
