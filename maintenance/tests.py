@@ -9,6 +9,7 @@ from maintenance.services import (
     calculate_next_due,
     get_day_countdown,
     format_countdown_status,
+    generate_markdown_report,
 )
 
 
@@ -173,3 +174,70 @@ class RecalculationDomainServiceTests(TestCase):
         # None
         self.assertIsNone(get_day_countdown(None))
         self.assertEqual(format_countdown_status(None), "Not scheduled")
+
+
+class MarkdownReportServiceTests(TestCase):
+    def test_empty_database_report(self):
+        """Verify report structure and empty messages when no tasks exist."""
+        report = generate_markdown_report()
+        self.assertIn("# Household Maintenance Report", report)
+        self.assertIn("Generated on:", report)
+        self.assertIn("UTC", report)
+        self.assertIn("## Overdue Tasks", report)
+        self.assertIn("## Upcoming Tasks", report)
+        self.assertIn("## Completion History", report)
+        self.assertIn("_No maintenance tasks recorded._", report)
+
+    def test_populated_report_with_overdue_and_upcoming(self):
+        """Verify overdue, upcoming tables, null dates, and sanitization."""
+        ref_today = datetime.date(2026, 9, 10)
+
+        # Overdue task with pipe in title
+        t_overdue = Task.objects.create(
+            title="Clean Filter | Left & Right",
+            interval_type=Task.IntervalType.ELAPSED,
+            interval_value=30,
+            next_due=datetime.date(2026, 9, 5),
+        )
+        # Upcoming task
+        t_upcoming = Task.objects.create(
+            title="Oil Chainsaw",
+            interval_type=Task.IntervalType.ELAPSED,
+            interval_value=60,
+            next_due=datetime.date(2026, 9, 20),
+        )
+        # Unscheduled task (next_due is None)
+        t_none = Task.objects.create(
+            title="Inspect Roof",
+            interval_type=Task.IntervalType.CALENDAR,
+            interval_value=12,
+            next_due=None,
+        )
+
+        # History with multiline notes
+        TaskHistory.objects.create(
+            task=t_overdue,
+            completed_at=timezone.make_aware(datetime.datetime(2026, 8, 5, 14, 30)),
+            notes="Line 1\nLine 2 | with pipe",
+        )
+
+        report = generate_markdown_report(reference_date=ref_today)
+
+        # Check header
+        self.assertIn("# Household Maintenance Report", report)
+
+        # Check Overdue section table
+        self.assertIn("| Task ID | Title | Recurrence | Next Due Date | Days Overdue |", report)
+        self.assertIn(f"| {t_overdue.id} | Clean Filter \\| Left & Right |", report)
+        self.assertIn("5 |", report)
+
+        # Check Upcoming section table
+        self.assertIn("| Task ID | Title | Recurrence | Next Due Date | Days Remaining |", report)
+        self.assertIn(f"| {t_upcoming.id} | Oil Chainsaw |", report)
+        self.assertIn("10 |", report)
+        self.assertIn(f"| {t_none.id} | Inspect Roof |", report)
+        self.assertIn("N/A |", report)
+
+        # Check Completion History
+        self.assertIn(f"### Task #{t_overdue.id}: Clean Filter \\| Left & Right", report)
+        self.assertIn("Line 1 Line 2 \\| with pipe", report)
