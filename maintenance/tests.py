@@ -13,6 +13,8 @@ from maintenance.bot import (
     start_command,
     list_command,
     due_command,
+    add_command,
+    done_command,
     create_bot_application,
 )
 from maintenance.models import Task, TaskHistory
@@ -369,3 +371,79 @@ class TelegramBotClientAndAuthTests(TestCase):
         self.assertIn(f"OVERDUE by 2 days*: [{t_overdue.id}] Check Fire Extinguisher", response_text)
         self.assertIn(f"Due in 3 days*: [{t_near.id}] Water Garden Herbs", response_text)
         self.assertNotIn("Service Lawn Mower", response_text)
+
+    @override_settings(TELEGRAM_AUTHORIZED_USER_IDS=[123456])
+    async def test_add_command_valid_and_invalid_syntax(self):
+        """Verify /add creates tasks when valid and returns errors when invalid."""
+        update = self._create_mock_update(user_id=123456)
+        context = MagicMock()
+
+        # Malformed format (missing pipes)
+        context.args = ["Clean", "Filter", "30", "days"]
+        await add_command(update, context)
+        update.effective_message.reply_text.assert_called_once()
+        self.assertIn("Invalid format", update.effective_message.reply_text.call_args[0][0])
+
+        # Malformed interval
+        update.effective_message.reply_text.reset_mock()
+        context.args = ["Clean", "Filter", "|", "invalid_interval", "|", "elapsed"]
+        await add_command(update, context)
+        self.assertIn("Invalid interval", update.effective_message.reply_text.call_args[0][0])
+
+        # Valid /add command
+        update.effective_message.reply_text.reset_mock()
+        context.args = ["Clean", "AC", "Filters", "|", "30", "days", "|", "elapsed"]
+        await add_command(update, context)
+        update.effective_message.reply_text.assert_called_once()
+        resp = update.effective_message.reply_text.call_args[0][0]
+        self.assertIn("Task #", resp)
+        self.assertIn("Clean AC Filters", resp)
+        self.assertIn("Dynamic Elapsed", resp)
+
+        # Confirm DB creation
+        task = await Task.objects.aget(title="Clean AC Filters")
+        self.assertEqual(task.interval_value, 30)
+        self.assertEqual(task.interval_type, Task.IntervalType.ELAPSED)
+        self.assertIsNotNone(task.next_due)
+
+    @override_settings(TELEGRAM_AUTHORIZED_USER_IDS=[123456])
+    async def test_done_command_valid_and_invalid_task(self):
+        """Verify /done records completion, updates next_due, and handles missing tasks."""
+        update = self._create_mock_update(user_id=123456)
+        context = MagicMock()
+
+        # Invalid task ID format
+        context.args = ["abc"]
+        await done_command(update, context)
+        self.assertIn("Invalid format", update.effective_message.reply_text.call_args[0][0])
+
+        # Non-existent task ID
+        update.effective_message.reply_text.reset_mock()
+        context.args = ["9999"]
+        await done_command(update, context)
+        self.assertIn("Task with ID 9999 not found", update.effective_message.reply_text.call_args[0][0])
+
+        # Create real task
+        task = await Task.objects.acreate(
+            title="Clean Microwave",
+            interval_type=Task.IntervalType.ELAPSED,
+            interval_value=14,
+            next_due=timezone.now().date(),
+        )
+
+        update.effective_message.reply_text.reset_mock()
+        context.args = [str(task.id), "Steam", "cleaned", "with", "lemon"]
+        await done_command(update, context)
+        update.effective_message.reply_text.assert_called_once()
+        resp = update.effective_message.reply_text.call_args[0][0]
+        self.assertIn("Completed!", resp)
+        self.assertIn("Steam cleaned with lemon", resp)
+
+        # Check DB updates
+        updated_task = await Task.objects.aget(id=task.id)
+        self.assertEqual(updated_task.last_completed, timezone.now().date())
+        self.assertEqual(updated_task.next_due, timezone.now().date() + datetime.timedelta(days=14))
+
+        history = await TaskHistory.objects.filter(task=updated_task).afirst()
+        self.assertIsNotNone(history)
+        self.assertEqual(history.notes, "Steam cleaned with lemon")

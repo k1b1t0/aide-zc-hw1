@@ -1,9 +1,11 @@
 import datetime
 import functools
 import logging
+import re
 from typing import Callable, List
 from asgiref.sync import sync_to_async
 from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
 from telegram import Update
 from telegram.ext import (
@@ -13,8 +15,12 @@ from telegram.ext import (
     ContextTypes,
 )
 
-from maintenance.models import Task
-from maintenance.services import get_day_countdown, format_countdown_status
+from maintenance.models import Task, TaskHistory
+from maintenance.services import (
+    calculate_next_due,
+    get_day_countdown,
+    format_countdown_status,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +51,7 @@ async def _reply_chunked(update: Update, lines: List[str], max_len: int = 4000) 
     current_length = 0
 
     for line in lines:
-        line_len = len(line) + 1  # newline
+        line_len = len(line) + 1
         if current_length + line_len > max_len and current_chunk:
             await update.effective_message.reply_text("\n".join(current_chunk))
             current_chunk = [line]
@@ -146,6 +152,148 @@ async def due_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await _reply_chunked(update, lines)
 
 
+def _sync_create_task(title: str, interval_val: int, interval_type: str) -> Task:
+    task = Task(
+        title=title,
+        interval_value=interval_val,
+        interval_type=interval_type,
+    )
+    initial_due = calculate_next_due(task, completion_date=timezone.now().date())
+    task.next_due = initial_due
+    task.save()
+    return task
+
+
+@authorized_only
+async def add_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handler for /add command: /add <title> | <interval_value> <days|months> | <calendar|elapsed>"""
+    usage_error = (
+        "❌ *Invalid format.*\n\n"
+        "*Usage:*\n"
+        "`/add <title> | <interval_value> <days|months> | <calendar|elapsed>`\n\n"
+        "*Example:*\n"
+        "`/add Clean AC Filters | 30 days | elapsed`\n"
+        "`/add Inspect Roof | 12 months | calendar`"
+    )
+
+    if not update.effective_message or not context.args:
+        if update.effective_message:
+            await update.effective_message.reply_text(usage_error, parse_mode="Markdown")
+        return
+
+    raw_text = " ".join(context.args)
+    parts = [p.strip() for p in raw_text.split("|")]
+
+    if len(parts) != 3:
+        await update.effective_message.reply_text(usage_error, parse_mode="Markdown")
+        return
+
+    title, interval_raw, mode_raw = parts
+    if not title:
+        await update.effective_message.reply_text(usage_error, parse_mode="Markdown")
+        return
+
+    # Parse interval: e.g. "30 days", "3 months"
+    interval_match = re.match(r"^(\d+)\s*(days?|months?)$", interval_raw, re.IGNORECASE)
+    if not interval_match:
+        await update.effective_message.reply_text(
+            "❌ Invalid interval. Specify a number followed by days or months (e.g. `30 days` or `3 months`).",
+            parse_mode="Markdown",
+        )
+        return
+
+    interval_val = int(interval_match.group(1))
+    if interval_val <= 0:
+        await update.effective_message.reply_text("❌ Interval value must be greater than 0.")
+        return
+
+    # Parse mode: calendar vs elapsed
+    mode_clean = mode_raw.strip().upper()
+    if mode_clean in ["CALENDAR", "CAL"]:
+        interval_type = Task.IntervalType.CALENDAR
+    elif mode_clean in ["ELAPSED", "DYNAMIC", "DYN"]:
+        interval_type = Task.IntervalType.ELAPSED
+    else:
+        await update.effective_message.reply_text(
+            "❌ Invalid mode. Mode must be either `calendar` or `elapsed`.",
+            parse_mode="Markdown",
+        )
+        return
+
+    task = await sync_to_async(_sync_create_task)(title, interval_val, interval_type)
+
+    confirm_msg = (
+        f"✅ *Task #{task.id} Created!*\n\n"
+        f"• *Title:* {task.title}\n"
+        f"• *Mode:* {task.get_interval_type_display()}\n"
+        f"• *Interval:* {task.interval_value}\n"
+        f"• *Initial Due Date:* {task.next_due}\n"
+    )
+    await update.effective_message.reply_text(confirm_msg, parse_mode="Markdown")
+
+
+def _sync_complete_task(task_id: int, notes: str):
+    with transaction.atomic():
+        try:
+            task = Task.objects.select_for_update().get(id=task_id)
+        except Task.DoesNotExist:
+            return None, None
+
+        now = timezone.now()
+        history = TaskHistory.objects.create(
+            task=task,
+            completed_at=now,
+            notes=notes,
+        )
+
+        task.last_completed = now.date()
+        task.next_due = calculate_next_due(task, completion_date=now.date(), reference_date=now.date())
+        task.save()
+        return task, history
+
+
+@authorized_only
+async def done_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handler for /done command: /done <id> [optional notes...]"""
+    usage_error = (
+        "❌ *Invalid format.*\n\n"
+        "*Usage:*\n"
+        "`/done <id> [optional notes...]`\n\n"
+        "*Example:*\n"
+        "`/done 1 Replaced with 3M Filtrete filter`"
+    )
+
+    if not update.effective_message or not context.args:
+        if update.effective_message:
+            await update.effective_message.reply_text(usage_error, parse_mode="Markdown")
+        return
+
+    first_arg = context.args[0]
+    if not first_arg.isdigit():
+        await update.effective_message.reply_text(usage_error, parse_mode="Markdown")
+        return
+
+    task_id = int(first_arg)
+    notes = " ".join(context.args[1:]).strip()
+
+    result = await sync_to_async(_sync_complete_task)(task_id, notes)
+    task, history = result
+
+    if task is None:
+        await update.effective_message.reply_text(f"❌ Task with ID {task_id} not found.")
+        return
+
+    notes_display = f"\n• *Notes:* {notes}" if notes else ""
+    confirm_msg = (
+        f"✅ *Task #{task.id} Completed!*\n\n"
+        f"• *Title:* {task.title}\n"
+        f"• *Completed on:* {history.completed_at.strftime('%Y-%m-%d %H:%M')}"
+        f"{notes_display}\n"
+        f"• *Next Due Date:* {task.next_due}"
+    )
+    await update.effective_message.reply_text(confirm_msg, parse_mode="Markdown")
+
+
 def create_bot_application(token: str) -> Application:
     """Build and configure the Telegram bot application with handlers."""
     application = ApplicationBuilder().token(token).build()
@@ -154,5 +302,7 @@ def create_bot_application(token: str) -> Application:
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("list", list_command))
     application.add_handler(CommandHandler("due", due_command))
+    application.add_handler(CommandHandler("add", add_command))
+    application.add_handler(CommandHandler("done", done_command))
 
     return application
